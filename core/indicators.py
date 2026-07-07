@@ -4,7 +4,6 @@ external I/O — so both agents compute RSI/SMA/etc. identically instead of
 each reimplementing it.
 """
 
-import numpy as np
 import pandas as pd
 
 
@@ -14,7 +13,10 @@ def rsi(close: pd.Series, period: int = 14) -> pd.Series:
     loss = -delta.clip(upper=0)
     avg_gain = gain.ewm(alpha=1 / period, min_periods=period, adjust=False).mean()
     avg_loss = loss.ewm(alpha=1 / period, min_periods=period, adjust=False).mean()
-    rs = avg_gain / avg_loss.replace(0, np.nan)
+    # avg_loss can legitimately be 0 in a strong uptrend (no down-ticks in the
+    # window) — that should read as RSI=100, not NaN, so let pandas' natural
+    # inf/NaN float division stand rather than masking 0 to NaN.
+    rs = avg_gain / avg_loss
     return 100 - (100 / (1 + rs))
 
 
