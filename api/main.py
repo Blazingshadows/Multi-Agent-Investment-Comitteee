@@ -18,8 +18,17 @@ from datetime import datetime
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
+from backend.data import replay
 from backend.orchestrator import run_cycle, run_square_off
-from core.config import CAPITAL, CYCLE_INTERVAL_SECONDS, DB_PATH, SESSION_SQUARE_OFF, WATCHLIST
+from core.config import (
+    ACTIVE_WATCHLIST,
+    CAPITAL,
+    CYCLE_INTERVAL_SECONDS,
+    DB_PATH,
+    REPLAY_CYCLE_INTERVAL_SECONDS,
+    REPLAY_MODE,
+    SESSION_SQUARE_OFF,
+)
 from core.portfolio import Portfolio
 from db.persistence import get_decision_log, get_portfolio_curve, get_trade_history, init_db
 
@@ -46,10 +55,21 @@ async def _broadcast(message: dict) -> None:
         _websocket_clients.discard(ws)
 
 
+def _current_cycle_ts_and_square_off() -> tuple[datetime, bool]:
+    """REPLAY_MODE uses the accelerated virtual clock (real wall-clock time
+    of night has nothing to do with the simulated trading session); live
+    mode compares real time-of-day against SESSION_SQUARE_OFF as usual.
+    """
+    if REPLAY_MODE:
+        return replay.current_sim_time(), replay.is_session_over()
+    now = datetime.now()
+    return now, now.strftime("%H:%M") >= SESSION_SQUARE_OFF
+
+
 async def _cycle_loop() -> None:
+    interval = REPLAY_CYCLE_INTERVAL_SECONDS if REPLAY_MODE else CYCLE_INTERVAL_SECONDS
     while True:
-        now = datetime.now()
-        square_off_time = now.strftime("%H:%M") >= SESSION_SQUARE_OFF
+        now, square_off_time = _current_cycle_ts_and_square_off()
 
         if square_off_time and not _state["squared_off"]:
             with _cycle_lock:
@@ -62,7 +82,7 @@ async def _cycle_loop() -> None:
                 _state["last_cycle_ts"] = now.isoformat()
             await _broadcast({"type": "cycle_complete", "cycle_ts": now.isoformat(), "decisions": len(rows)})
 
-        await asyncio.sleep(CYCLE_INTERVAL_SECONDS)
+        await asyncio.sleep(interval)
 
 
 @asynccontextmanager
@@ -83,8 +103,9 @@ def status():
     return {
         "last_cycle_ts": _state["last_cycle_ts"],
         "squared_off": _state["squared_off"],
-        "watchlist": WATCHLIST,
-        "cycle_interval_seconds": CYCLE_INTERVAL_SECONDS,
+        "watchlist": ACTIVE_WATCHLIST,
+        "cycle_interval_seconds": REPLAY_CYCLE_INTERVAL_SECONDS if REPLAY_MODE else CYCLE_INTERVAL_SECONDS,
+        "replay_mode": REPLAY_MODE,
     }
 
 
@@ -132,7 +153,7 @@ async def trigger_cycle():
     """Manual trigger — run one cycle immediately without waiting for the
     interval. Useful for demo control and testing. Shares _cycle_lock with
     the background loop so the two can never run concurrently."""
-    now = datetime.now()
+    now, _ = _current_cycle_ts_and_square_off()
     with _cycle_lock:
         rows = await asyncio.to_thread(run_cycle, _state["conn"], _state["portfolio"], now)
     await _broadcast({"type": "cycle_complete", "cycle_ts": now.isoformat(), "decisions": len(rows)})

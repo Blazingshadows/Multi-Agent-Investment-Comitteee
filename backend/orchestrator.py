@@ -10,10 +10,11 @@ from datetime import datetime, timedelta
 
 from backend.agents import forecasting, fundamental, macro_policy, risk, sentiment, technical
 from backend.critics import devils_advocate, opportunity
+from backend.data import market_data, replay
 from backend.data.macro_calendar import get_macro_context
-from backend.data.market_data import fetch_fundamentals, fetch_ohlcv
+from backend.data.market_data import fetch_fundamentals
 from backend.data.news_feed import fetch_stock_news
-from core.config import WATCHLIST
+from core.config import ACTIVE_WATCHLIST, REPLAY_MODE
 from core.consensus_engine import evaluate_switch, run_consensus
 from core.portfolio import Portfolio, execute, force_square_off, portfolio_value, review_trade
 from core.schemas import Action, ConsensusResult, DecisionLogRow, ExpectedRiskReturn
@@ -21,6 +22,17 @@ from core.trust_store import record_prediction, resolve_pending_predictions
 from db.persistence import insert_decision_log, insert_portfolio_snapshot, insert_trade
 
 SPECIALIST_AGENTS = [technical, forecasting, fundamental, sentiment, macro_policy, risk]
+
+
+def fetch_ohlcv(symbol: str, period: str = "5d", interval: str = "5m"):
+    """Swappable data source — REPLAY_MODE routes through cached historical
+    bars on an accelerated virtual clock instead of live (empty, market
+    closed) data. Only OHLCV needs this; fundamentals/news work fine live at
+    any hour.
+    """
+    if REPLAY_MODE:
+        return replay.fetch_ohlcv(symbol, period=period, interval=interval)
+    return market_data.fetch_ohlcv(symbol, period=period, interval=interval)
 
 _fundamentals_cache: dict[str, dict] = {}
 _news_cache: dict[str, tuple[datetime, list[str]]] = {}
@@ -92,7 +104,7 @@ def _expected_risk_return(context: dict, predicted_return: float | None) -> Expe
     )
 
 
-def run_cycle(conn, portfolio: Portfolio, cycle_ts: datetime, watchlist: list[str] = WATCHLIST) -> list[DecisionLogRow]:
+def run_cycle(conn, portfolio: Portfolio, cycle_ts: datetime, watchlist: list[str] = ACTIVE_WATCHLIST) -> list[DecisionLogRow]:
     contexts: dict[str, dict] = {}
     all_agent_outputs: dict[str, list] = {}
     current_prices: dict[str, float] = {}

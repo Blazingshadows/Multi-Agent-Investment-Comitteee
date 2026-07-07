@@ -35,6 +35,8 @@ with st.sidebar:
 
     status = _get("/api/status")
     if status:
+        if status.get("replay_mode"):
+            st.info("🔁 Replay mode — running against cached historical bars, not live NSE data.")
         st.write("**Last cycle:**", status["last_cycle_ts"] or "not run yet")
         st.write("**Squared off:**", status["squared_off"])
         st.write("**Cycle interval:**", f"{status['cycle_interval_seconds']}s")

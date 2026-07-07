@@ -4,10 +4,20 @@ and rate constants during the hour-18 dry run; don't hand-edit them in two
 places.
 """
 
+import os
+
+from dotenv import load_dotenv
+
+load_dotenv()
+
 CAPITAL = 10_000.0
 LEVERAGE = 2
 BUYING_POWER = CAPITAL * LEVERAGE
 
+# Fixed — the Forecasting agent one-hot-encodes symbols against this exact
+# list at training time (backend/agents/forecasting.py). Never shrink this
+# to "trim the watchlist"; it silently breaks the trained model's feature
+# alignment. Use ACTIVE_WATCHLIST below instead.
 WATCHLIST = [
     "RELIANCE",
     "TCS",
@@ -20,6 +30,11 @@ WATCHLIST = [
     "LT",
     "ADANIENT",
 ]
+
+# The subset actually evaluated each cycle by the orchestrator/API — trim
+# via env for rate-limit/demo reasons without touching WATCHLIST above.
+# e.g. ACTIVE_WATCHLIST=INFY,TCS,RELIANCE in .env
+ACTIVE_WATCHLIST = [s.strip() for s in os.getenv("ACTIVE_WATCHLIST", ",".join(WATCHLIST)).split(",") if s.strip()]
 
 # Consensus decision thresholds — §3
 THETA_HOLD = 0.15
@@ -57,3 +72,10 @@ FORECAST_CONFIDENCE_SCALE = 0.005  # |predicted return| at/above this -> confide
 # API / orchestrator runtime (api/main.py)
 CYCLE_INTERVAL_SECONDS = 300  # one orchestrator cycle every 5 minutes
 DB_PATH = "committee.db"
+
+# Replay mode (backend/data/replay.py) — set REPLAY_MODE=true in .env when
+# NSE is closed, so the pipeline runs against cached historical bars on an
+# accelerated virtual clock instead of live (empty) market data.
+REPLAY_MODE = os.getenv("REPLAY_MODE", "false").lower() == "true"
+REPLAY_SPEED = float(os.getenv("REPLAY_SPEED", "60"))  # 1 real second = this many simulated seconds
+REPLAY_CYCLE_INTERVAL_SECONDS = 10  # real seconds between cycles while replaying
