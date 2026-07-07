@@ -197,49 +197,76 @@ This one table directly satisfies every bullet in the problem statement's "Per T
 
 ---
 
-## 7. 24-hour plan for 2–3 people
+## 7. 24-hour plan (2-person team)
 
-**If 3 people**, split by layer (minimizes merge conflicts, clean interfaces):
-- **P1 — Agents & Consensus (the graded core):** all 5 agents, both critics, consensus engine, historical-reliability/trust tracking.
-- **P2 — Data & Execution:** yfinance/news ingestion, replay mode, cost model, portfolio/execution agent, SQLite schema, FastAPI, llm_router with fallback.
-- **P3 — Dashboard & Demo:** React (Vite) or Streamlit dashboard, live polling/WebSocket, trade log + portfolio curve + agent-vote panel, plus owns the README/pitch deck and rehearses the demo.
+**Your team is 2 people, on 2 separate computers, both on Claude Code.** The split:
 
-**If 2 people:** merge P2+P3 into one "platform" person (start with Streamlit, not React — upgrade only if hours remain), the other owns Agents & Consensus full-time since that's what's explicitly graded. Both of you have Claude Code — the split below is designed so each of you drives your own Claude Code session against a frozen interface and never waits on the other.
+| | Branch | Owns | Status right now |
+|---|---|---|---|
+| **Sachin — Platform** | `platform-and-dashboard` | data ingestion, cost model, portfolio/risk, persistence, API, dashboard | In progress |
+| **Teammate — Committee** (the graded core) | `agents-and-consensus` | all specialist agents, both critics, the consensus formula, trust tracking | Not started yet |
 
-### 7a. Two-person parallel/async plan (both on Claude Code)
+*(A 3-person P1/P2/P3 layer split exists at the very bottom of this section — ignore it unless a third person actually joins.)*
 
-**Directory ownership — near-zero file overlap, so there's almost nothing to merge-conflict on:**
+### Already built, tested, and pushed to `main` — this is the frozen contract
 
-| Owner | Files |
-|---|---|
-| **Person A — Committee** (the graded core) | `backend/agents/*` (6 specialists + Forecasting model), `backend/critics/*` (Devil's-Advocate, Opportunity), `core/consensus_engine.py`, `core/trust_store.py`, `core/llm_router.py` |
-| **Person B — Platform** | `backend/data/*` (yfinance, news, replay mode), `core/cost_model.py`, `core/portfolio.py`, `db/schema.sql`, `api/main.py`, `frontend/` or `dashboard.py` (Streamlit) |
-| **Shared, written together, then frozen** | `core/schemas.py` — pydantic models for `AgentOutput`, `ConsensusResult`, `DecisionLogRow` (§6), `CostBreakdown` (§4) |
+Both of you build against these. If either of you needs to change one, tell the other person first — everything downstream assumes these shapes won't move.
 
-**The only synchronous step:** spend the first 30–45 minutes together writing `core/schemas.py`. Once it's committed, it's the contract — Person A returns `ConsensusResult` objects, Person B's execution/API/dashboard consumes them, and neither needs to read the other's code to keep building.
+- `core/schemas.py` — `AgentOutput`, `AgentWeight`, `CriticFeedback`, `ExpectedRiskReturn`, `ConsensusResult`, `CostBreakdown`, `DecisionLogRow`
+- `core/config.py` — capital/leverage, watchlist, consensus thresholds (`θ_hold`, `θ_buy`, `θ_sell`, `λ`, `γ`), cost-model rates
+- `db/schema.sql` — `decision_log`, `agent_predictions`, `trades`, `portfolio_snapshots`
+- `tests/fixtures/agent_outputs.json` — a 6-agent fixture to build against before real agents exist
+- `tests/test_stub_pipeline.py` — proves fixture → consensus → cost model → SQLite works end-to-end. **Rerun this (`pytest tests/test_stub_pipeline.py`) after any change** — if it still passes, the contract held.
+- Also on `platform-and-dashboard` specifically: `backend/data/market_data.py` (verified against live yfinance) and `scripts/backfill_history.py` (already pulled 60 days of 5-min bars per watchlist stock, cached to `data/history/*.parquet`, gitignored — run it yourself once to get your own copy).
 
-**Stub-first so nobody blocks on the other:** immediately after `schemas.py`, each person commits a fixture instead of real logic — Person A writes `tests/fixtures/agent_outputs.json` (5–6 fake `AgentOutput` rows) plus a `consensus_engine.py` that returns one hardcoded `ConsensusResult`; Person B builds the `decision_log` writer, portfolio updater, and dashboard entirely against that hardcoded result. By hour 2 both sides have a full pipeline running end-to-end on fake data, in parallel. Real logic replaces the stubs later (Person A swaps in the real §3 formula around hour 6–10, Person B swaps fake JSON for live yfinance/news around the same time) — since the interface never changes, these swaps never touch the other person's files.
+### Teammate — your checklist, in order (branch: `agents-and-consensus`)
 
-**Git workflow for two concurrent Claude Code sessions:**
-- Each person works in their own `git worktree` off the same repo (`git worktree add ../committee-agents agents-and-consensus`, `git worktree add ../committee-platform platform-and-dashboard`) — separate working directories means neither Claude Code session ever sees the other's uncommitted edits or risks a mid-edit conflict.
-- Two branches, merged to `main` only at the integration checkpoints below — not continuously. With a frozen interface there's usually nothing to resolve.
-- `PROJECT.md`, `README.md`, and `core/schemas.py` live in both worktrees automatically (same repo) — that's what keeps two independent Claude Code sessions aligned on the contract without you having to explain it to each other out loud.
-- Within your own half, you can run more than one Claude Code session in parallel too, since your files are also mostly independent (e.g. Person A: one session on Technical/Fundamental/Sentiment while a second trains the Forecasting model; Person B: one session on the data layer while a second builds the dashboard).
+Setup:
+```bash
+git pull origin main
+git checkout -b agents-and-consensus
+pip install -r requirements.txt
+pytest tests/test_stub_pipeline.py   # confirm the baseline passes on your machine before touching anything
+```
 
-**Integration checkpoints — the only two moments you need to sync live:**
-- **~Hour 6:** both stub pipelines run end-to-end; merge branches, confirm `schemas.py` didn't drift, watch one full fake cycle together.
-- **~Hour 14:** both sides now have real logic; merge, run one real dry-run cycle in replay mode end-to-end, fix any schema mismatches that crept in.
+Build, in this order:
+1. **`core/llm_router.py`** (new) — common `complete(system, user, json_schema)` interface, Groq primary → local Ollama (GPU box) → OpenRouter → local Ollama (M1) fallback. Everything below needs this first.
+2. **`backend/agents/technical.py`, `fundamental.py`, `sentiment.py`, `macro_policy.py`, `risk.py`** (new) — each exposes `def analyze(symbol: str, context: dict) -> AgentOutput`. `context` is a loosely-typed dict (Sachin's data layer fills in `ohlcv`, `news`, `fundamentals`, `macro_flags`) — pull whatever keys your agent needs.
+3. **`backend/agents/forecasting.py`** (new) — trained LightGBM/XGBoost on lagged OHLCV from `data/history/*.parquet`. Not an LLM call — same `AgentOutput` shape as every other agent.
+4. **`backend/critics/devils_advocate.py`, `opportunity.py`** (new).
+5. **`core/trust_store.py`** (new) — reads/writes the `agent_predictions` table for `historical_reliability_i` / `herding_penalty_i`.
+6. **`core/consensus_engine.py`** — **replace the stub.** It currently just returns one hardcoded `ConsensusResult` — swap `run_consensus()` for the real §3 formula, including the `agreement_live_i` term.
+
+You should never need to open `backend/data/`, `core/cost_model.py`, `core/portfolio.py`, `db/`, or `api/` — everything you build only touches `core/schemas.py` types.
+
+### Sachin — your checklist (branch: `platform-and-dashboard`, already underway)
+
+Done: `backend/data/market_data.py`, `scripts/backfill_history.py`, `core/cost_model.py`.
+Next: `core/portfolio.py` (add the Risk Management Layer — leverage cap enforcement, approve/reduce/reject, forced square-off before market close), `db/persistence.py` (extend with `trades`/`agent_predictions`/`portfolio_snapshots` writers), then `api/main.py` + the dashboard, then the orchestrator loop that calls your teammate's agents each cycle.
+
+### Git workflow — two computers, no worktrees needed
+
+- Both of you `git pull origin main` to get the frozen contract.
+- Each person works on their own branch, entirely on their own machine — no shared filesystem, so there's nothing to coordinate beyond pushing/pulling.
+- Push periodically: `git push -u origin <branch>`.
+- **Integration checkpoints — the only moments you need to actually sync (call/message each other):**
+  - **~Hour 6:** both sides run end-to-end on real or stub logic; merge both branches into `main`, confirm `schemas.py` didn't drift.
+  - **~Hour 14:** both sides have real logic; merge again, run one real dry-run cycle in replay mode.
 - Everything else is async — commit small, push often, no need to narrate progress in real time.
 
 | Hours | Milestone |
 |---|---|
-| 0–2 | Repo scaffold, watchlist picked, yfinance pull working end-to-end (real + replay mode stubbed) — **also pull 4-6 weeks of 5-min history per watchlist stock now**, forecasting agent needs it early |
-| 2–6 | Skeleton pipeline runs with **stub agents** (fixed dummy outputs) all the way to a logged decision — get the full loop working before making any agent smart. In parallel (whoever owns forecasting): feature-engineer lagged OHLCV/indicators and get a first LightGBM/XGBoost fit running offline, even if crude |
-| 6–10 | Agents become real (indicators, sentiment LLM calls, fundamentals, risk stats); forecasting model trained, validated on held-out days, wrapped in the same `{direction, confidence, reasoning, evidence}` interface as the LLM agents |
-| 10–14 | Consensus engine (§3) + both critics + cost model + portfolio agent |
+| 0–2 | ✅ Done — repo scaffold, frozen contract, stub pipeline (tested), watchlist picked and fixed (TATAMOTORS→AXISBANK), 60 days of 5-min history backfilled |
+| 2–6 | Teammate: `llm_router.py` + first 2–3 real agents wired into the stub consensus. Sachin: Risk Layer in `portfolio.py`, extend `persistence.py`, start `api/main.py` |
+| 6–10 | Teammate: remaining agents real (indicators, sentiment LLM calls, fundamentals, risk stats); forecasting model trained and validated on held-out days |
+| 10–14 | Teammate: real consensus engine (§3) + both critics. Sachin: orchestrator loop wiring agents → consensus → execution → persistence. **Merge + integration checkpoint.** |
 | 14–18 | Dashboard wired to live backend |
 | 18–21 | Full dry run during/replaying market hours, tune thresholds, fix explainability gaps |
 | 21–24 | README, deck (reuse your existing PS slide + worked example), rehearse demo, freeze code |
+
+### If a third person joins later (otherwise ignore)
+
+Split the Committee half further: **P1 — Agents:** all 6 specialist agents + Forecasting model. **P2 — Consensus & Critics:** both critics, `trust_store.py`, `consensus_engine.py`. Platform stays as one person (Sachin) unless a fourth joins.
 
 Forecasting-model note: don't reach for a deep LSTM under time pressure — a gradient-boosted tree on lagged returns/indicators trains in seconds on either machine, is trivial to explain to judges via feature importances, and is much less likely to blow up your 24h budget than debugging a neural net at 3am. Treat "deep learning" in the tool name as optional, not literal; a defensible trained model beats a fragile fancy one.
 
