@@ -78,4 +78,8 @@ DB_PATH = "committee.db"
 # accelerated virtual clock instead of live (empty) market data.
 REPLAY_MODE = os.getenv("REPLAY_MODE", "false").lower() == "true"
 REPLAY_SPEED = float(os.getenv("REPLAY_SPEED", "60"))  # 1 real second = this many simulated seconds
-REPLAY_CYCLE_INTERVAL_SECONDS = 10  # real seconds between cycles while replaying
+# A real cycle (network + LLM calls per stock) took ~18s for 3 stocks in
+# testing and can run much longer under LLM rate-limit retries — this needs
+# real headroom, not a fixed short tick, or the lock never gets released
+# long enough for /api/cycle/run or even plain reads to get through.
+REPLAY_CYCLE_INTERVAL_SECONDS = int(os.getenv("REPLAY_CYCLE_INTERVAL_SECONDS", "60"))

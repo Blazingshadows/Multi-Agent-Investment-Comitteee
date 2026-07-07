@@ -12,12 +12,18 @@ API_BASE = st.sidebar.text_input("API base URL", "http://127.0.0.1:8000")
 
 
 def _get(path: str, **params):
+    """No UI calls here on purpose — this is called from both the main
+    script body and from inside @st.fragment(run_every=...). A fragment can
+    only safely write to containers it created itself; writing to
+    st.sidebar (established outside the fragment) from a fragment-only
+    rerun raises StreamlitAPIException. Callers render their own,
+    correctly-scoped error message instead.
+    """
     try:
-        response = httpx.get(f"{API_BASE}{path}", params=params, timeout=10.0)
+        response = httpx.get(f"{API_BASE}{path}", params=params, timeout=15.0)
         response.raise_for_status()
         return response.json()
-    except httpx.HTTPError as exc:
-        st.sidebar.error(f"API unreachable: {exc}")
+    except httpx.HTTPError:
         return None
 
 
@@ -42,12 +48,15 @@ with st.sidebar:
         st.write("**Cycle interval:**", f"{status['cycle_interval_seconds']}s")
         st.write("**Watchlist:**")
         st.write(", ".join(status["watchlist"]))
+    else:
+        st.error("API unreachable — is `uvicorn api.main:app` running?")
 
 
 @st.fragment(run_every="10s")
 def render_summary():
     summary = _get("/api/summary")
     if not summary:
+        st.warning("API unreachable — retrying automatically.")
         return
 
     col1, col2, col3, col4 = st.columns(4)
@@ -88,7 +97,9 @@ st.subheader("Decision Log — Agent Votes, Consensus Reasoning, Critic Feedback
 st.caption("Every trade AND every no-trade decision is logged here, per the PS's explainability requirement.")
 
 decisions = _get("/api/decisions", limit=30)
-if not decisions:
+if decisions is None:
+    st.error("API unreachable — is `uvicorn api.main:app` running?")
+elif not decisions:
     st.info("No decisions logged yet — run a cycle.")
 else:
     for decision in decisions:

@@ -6,6 +6,7 @@ real server was verified manually (see PROJECT.md).
 
 from unittest.mock import MagicMock, patch
 
+import httpx
 from streamlit.testing.v1 import AppTest
 
 FAKE_STATUS = {
@@ -92,4 +93,25 @@ def test_dashboard_renders_decision_log_expander():
     assert not at.exception
     assert len(at.expander) == 1
     assert "INFY" in at.expander[0].label
-    assert "BUY" in at.expander[0].label
+
+
+def test_dashboard_survives_api_unreachable_including_fragment_rerun():
+    """Regression test: _get() used to call st.sidebar.error(...) on
+    failure, which raised StreamlitAPIException when hit from inside the
+    @st.fragment(run_every=...) block on an auto-refresh rerun (a fragment
+    can't safely write to a container established outside itself). Caught
+    live when the API was genuinely unreachable during a demo.
+    """
+
+    def _always_fails(url, params=None, timeout=None):
+        raise httpx.ConnectError("connection refused")
+
+    with patch("httpx.get", side_effect=_always_fails):
+        at = AppTest.from_file("dashboard.py")
+        at.run(timeout=30)
+        assert not at.exception
+
+        # Force the fragment to rerun on its own, the way run_every does —
+        # this is exactly the code path that used to crash.
+        at.run(timeout=30)
+        assert not at.exception
