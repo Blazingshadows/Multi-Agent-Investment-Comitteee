@@ -197,76 +197,38 @@ This one table directly satisfies every bullet in the problem statement's "Per T
 
 ---
 
-## 7. 24-hour plan (2-person team)
+## 7. Solo build plan
 
-**Your team is 2 people, on 2 separate computers, both on Claude Code.** The split:
+**Team is now just Sachin, working with Claude Code driving most of the implementation directly.** No more branch split — everything lives on `main`. Sequenced so the graded differentiator (the consensus engine) and everything testable without external API keys comes first; LLM-dependent pieces (needing a Groq/OpenRouter/Ollama key) come after.
 
-| | Branch | Owns | Status right now |
-|---|---|---|---|
-| **Sachin — Platform** | `platform-and-dashboard` | data ingestion, cost model, portfolio/risk, persistence, API, dashboard | In progress |
-| **Teammate — Committee** (the graded core) | `agents-and-consensus` | all specialist agents, both critics, the consensus formula, trust tracking | Not started yet |
-
-*(A 3-person P1/P2/P3 layer split exists at the very bottom of this section — ignore it unless a third person actually joins.)*
-
-### Already built, tested, and pushed to `main` — this is the frozen contract
-
-Both of you build against these. If either of you needs to change one, tell the other person first — everything downstream assumes these shapes won't move.
+### Already built, tested, and pushed to `main`
 
 - `core/schemas.py` — `AgentOutput`, `AgentWeight`, `CriticFeedback`, `ExpectedRiskReturn`, `ConsensusResult`, `CostBreakdown`, `DecisionLogRow`
-- `core/config.py` — capital/leverage, watchlist, consensus thresholds (`θ_hold`, `θ_buy`, `θ_sell`, `λ`, `γ`), cost-model rates
+- `core/config.py` — capital/leverage, watchlist (TATAMOTORS→AXISBANK fixed), consensus thresholds (`θ_hold`, `θ_buy`, `θ_sell`, `λ`, `γ`), cost-model rates
 - `db/schema.sql` — `decision_log`, `agent_predictions`, `trades`, `portfolio_snapshots`
-- `tests/fixtures/agent_outputs.json` — a 6-agent fixture to build against before real agents exist
-- `tests/test_stub_pipeline.py` — proves fixture → consensus → cost model → SQLite works end-to-end. **Rerun this (`pytest tests/test_stub_pipeline.py`) after any change** — if it still passes, the contract held.
-- Also on `platform-and-dashboard` specifically: `backend/data/market_data.py` (verified against live yfinance) and `scripts/backfill_history.py` (already pulled 60 days of 5-min bars per watchlist stock, cached to `data/history/*.parquet`, gitignored — run it yourself once to get your own copy).
+- `tests/fixtures/agent_outputs.json`, `tests/test_stub_pipeline.py` — proves fixture → consensus → cost model → SQLite end-to-end. **Rerun after any change to a shared file.**
+- `backend/data/market_data.py` (verified against live yfinance), `scripts/backfill_history.py` (60 days of 5-min bars per watchlist stock cached to `data/history/*.parquet`, gitignored)
+- `core/cost_model.py` — real §4 NSE cost formula
 
-### Teammate — your checklist, in order (branch: `agents-and-consensus`)
+### Build order
 
-Setup:
-```bash
-git pull origin main
-git checkout -b agents-and-consensus
-pip install -r requirements.txt
-pytest tests/test_stub_pipeline.py   # confirm the baseline passes on your machine before touching anything
-```
+No external dependency needed for these — build and fully test first:
+1. **`backend/agents/forecasting.py`** — trained LightGBM/XGBoost on `data/history/*.parquet`. The one tool that proves "custom AI/ML," not an LLM wrapper.
+2. **`backend/agents/technical.py`** — RSI/MACD/moving averages computed in code from live OHLCV.
+3. **`core/trust_store.py`** — reads/writes `agent_predictions` for `historical_reliability_i` / `herding_penalty_i`.
+4. **`core/consensus_engine.py`** — replace the stub with the real §3 formula (including `agreement_live_i`). This is the graded core — highest priority.
+5. **`core/portfolio.py`** — extend with the Risk Management Layer (leverage cap, approve/reduce/reject, forced square-off).
+6. **`db/persistence.py`** — extend with `trades`/`agent_predictions`/`portfolio_snapshots` writers.
 
-Build, in this order:
-1. **`core/llm_router.py`** (new) — common `complete(system, user, json_schema)` interface, Groq primary → local Ollama (GPU box) → OpenRouter → local Ollama (M1) fallback. Everything below needs this first.
-2. **`backend/agents/technical.py`, `fundamental.py`, `sentiment.py`, `macro_policy.py`, `risk.py`** (new) — each exposes `def analyze(symbol: str, context: dict) -> AgentOutput`. `context` is a loosely-typed dict (Sachin's data layer fills in `ohlcv`, `news`, `fundamentals`, `macro_flags`) — pull whatever keys your agent needs.
-3. **`backend/agents/forecasting.py`** (new) — trained LightGBM/XGBoost on lagged OHLCV from `data/history/*.parquet`. Not an LLM call — same `AgentOutput` shape as every other agent.
-4. **`backend/critics/devils_advocate.py`, `opportunity.py`** (new).
-5. **`core/trust_store.py`** (new) — reads/writes the `agent_predictions` table for `historical_reliability_i` / `herding_penalty_i`.
-6. **`core/consensus_engine.py`** — **replace the stub.** It currently just returns one hardcoded `ConsensusResult` — swap `run_consensus()` for the real §3 formula, including the `agreement_live_i` term.
+Needs an LLM provider key (Groq free tier is enough to start):
+7. **`core/llm_router.py`** — `complete(system, user, json_schema)` with Groq → Ollama → OpenRouter fallback.
+8. **`backend/agents/fundamental.py`, `sentiment.py`, `macro_policy.py`, `risk.py`**.
+9. **`backend/critics/devils_advocate.py`, `opportunity.py`**.
 
-You should never need to open `backend/data/`, `core/cost_model.py`, `core/portfolio.py`, `db/`, or `api/` — everything you build only touches `core/schemas.py` types.
-
-### Sachin — your checklist (branch: `platform-and-dashboard`, already underway)
-
-Done: `backend/data/market_data.py`, `scripts/backfill_history.py`, `core/cost_model.py`.
-Next: `core/portfolio.py` (add the Risk Management Layer — leverage cap enforcement, approve/reduce/reject, forced square-off before market close), `db/persistence.py` (extend with `trades`/`agent_predictions`/`portfolio_snapshots` writers), then `api/main.py` + the dashboard, then the orchestrator loop that calls your teammate's agents each cycle.
-
-### Git workflow — two computers, no worktrees needed
-
-- Both of you `git pull origin main` to get the frozen contract.
-- Each person works on their own branch, entirely on their own machine — no shared filesystem, so there's nothing to coordinate beyond pushing/pulling.
-- Push periodically: `git push -u origin <branch>`.
-- **Integration checkpoints — the only moments you need to actually sync (call/message each other):**
-  - **~Hour 6:** both sides run end-to-end on real or stub logic; merge both branches into `main`, confirm `schemas.py` didn't drift.
-  - **~Hour 14:** both sides have real logic; merge again, run one real dry-run cycle in replay mode.
-- Everything else is async — commit small, push often, no need to narrate progress in real time.
-
-| Hours | Milestone |
-|---|---|
-| 0–2 | ✅ Done — repo scaffold, frozen contract, stub pipeline (tested), watchlist picked and fixed (TATAMOTORS→AXISBANK), 60 days of 5-min history backfilled |
-| 2–6 | Teammate: `llm_router.py` + first 2–3 real agents wired into the stub consensus. Sachin: Risk Layer in `portfolio.py`, extend `persistence.py`, start `api/main.py` |
-| 6–10 | Teammate: remaining agents real (indicators, sentiment LLM calls, fundamentals, risk stats); forecasting model trained and validated on held-out days |
-| 10–14 | Teammate: real consensus engine (§3) + both critics. Sachin: orchestrator loop wiring agents → consensus → execution → persistence. **Merge + integration checkpoint.** |
-| 14–18 | Dashboard wired to live backend |
-| 18–21 | Full dry run during/replaying market hours, tune thresholds, fix explainability gaps |
-| 21–24 | README, deck (reuse your existing PS slide + worked example), rehearse demo, freeze code |
-
-### If a third person joins later (otherwise ignore)
-
-Split the Committee half further: **P1 — Agents:** all 6 specialist agents + Forecasting model. **P2 — Consensus & Critics:** both critics, `trust_store.py`, `consensus_engine.py`. Platform stays as one person (Sachin) unless a fourth joins.
+Ties everything together:
+10. **Orchestrator loop** — each cycle: agents → consensus → execution → persistence.
+11. **`api/main.py`** (FastAPI) + **dashboard** (Streamlit).
+12. Full dry run in replay mode, tune thresholds, freeze code.
 
 Forecasting-model note: don't reach for a deep LSTM under time pressure — a gradient-boosted tree on lagged returns/indicators trains in seconds on either machine, is trivial to explain to judges via feature importances, and is much less likely to blow up your 24h budget than debugging a neural net at 3am. Treat "deep learning" in the tool name as optional, not literal; a defensible trained model beats a fragile fancy one.
 
