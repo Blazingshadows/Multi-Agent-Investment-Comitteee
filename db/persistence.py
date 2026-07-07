@@ -14,7 +14,15 @@ SCHEMA_PATH = Path(__file__).parent / "schema.sql"
 
 
 def init_db(db_path: str) -> sqlite3.Connection:
-    conn = sqlite3.connect(db_path)
+    """check_same_thread=False + WAL mode: the API layer opens one
+    connection per request (cheap for SQLite) from whatever thread FastAPI's
+    threadpool hands it, while the orchestrator's cycle loop holds its own
+    long-lived writer connection. WAL mode means readers never block on the
+    writer mid-cycle — without it, a multi-minute orchestrator cycle would
+    freeze every dashboard read for its entire duration.
+    """
+    conn = sqlite3.connect(db_path, check_same_thread=False)
+    conn.execute("PRAGMA journal_mode=WAL")
     conn.executescript(SCHEMA_PATH.read_text())
     return conn
 
