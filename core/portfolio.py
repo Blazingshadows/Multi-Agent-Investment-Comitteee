@@ -6,14 +6,22 @@ square-off before market close.
 
 from dataclasses import dataclass, field
 
-from core.config import BUYING_POWER, MAX_POSITION_FRACTION, MAX_RISK_SCORE
+from core.config import BUYING_POWER, CAPITAL, MAX_POSITION_FRACTION, MAX_RISK_SCORE
 from core.cost_model import apply_costs
 from core.schemas import Action, ConsensusResult, CostBreakdown
 
 
 @dataclass
 class Portfolio:
-    cash: float = BUYING_POWER
+    """cash starts at CAPITAL (the trader's own ₹10,000), not BUYING_POWER
+    (₹20,000) — leverage lets a position's *value* reach up to BUYING_POWER,
+    it doesn't hand over 2x cash up front. A leveraged BUY can legitimately
+    push cash negative (margin used), offset by the position's value; net
+    portfolio_value() is unaffected by leverage itself, only by costs and
+    price moves — exactly as it should be.
+    """
+
+    cash: float = CAPITAL
     positions: dict[str, float] = field(default_factory=dict)  # symbol -> qty (positive = long)
 
 

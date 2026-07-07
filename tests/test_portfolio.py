@@ -1,6 +1,15 @@
-from core.config import BUYING_POWER, MAX_POSITION_FRACTION, MAX_RISK_SCORE
+from core.config import BUYING_POWER, CAPITAL, MAX_POSITION_FRACTION, MAX_RISK_SCORE
 from core.portfolio import ExecutionResult, Portfolio, execute, force_square_off, portfolio_value, review_trade
 from core.schemas import Action, ConsensusResult, ExpectedRiskReturn
+
+
+def test_portfolio_starts_with_own_capital_not_buying_power():
+    # Leverage lets a position's *value* reach BUYING_POWER (2x); it must
+    # never hand over 2x cash up front, or net_profit baselines are wrong.
+    portfolio = Portfolio()
+    assert portfolio.cash == CAPITAL
+    assert portfolio.cash < BUYING_POWER
+    assert portfolio_value(portfolio, {}) == CAPITAL
 
 
 def _decision(symbol: str, verdict: Action, allocation: float, risk_score: float = 0.3) -> ConsensusResult:
@@ -81,11 +90,12 @@ def test_review_trade_approves_sell_even_with_no_headroom():
 
 def test_execute_buy_updates_portfolio():
     portfolio = Portfolio()
+    starting_cash = portfolio.cash
     decision = _decision("INFY", Action.BUY, allocation=0.1)
     result = execute(portfolio, decision, price=1500.0)
     assert result.qty > 0
     assert portfolio.positions["INFY"] == result.qty
-    assert portfolio.cash < BUYING_POWER  # cash paid out
+    assert portfolio.cash < starting_cash  # cash paid out — a leveraged BUY can push this negative
 
 
 def test_execute_tiny_allocation_becomes_wait():
@@ -99,13 +109,14 @@ def test_execute_tiny_allocation_becomes_wait():
 
 def test_execute_sell_closes_the_full_held_position_not_an_allocation_based_size():
     portfolio = Portfolio(positions={"INFY": 10})
+    starting_cash = portfolio.cash
     # allocation is deliberately tiny/unrelated — SELL must ignore it and
     # close the actual held quantity, not recompute a fresh short size.
     decision = _decision("INFY", Action.SELL, allocation=0.01)
     result = execute(portfolio, decision, price=1500.0)
     assert result.qty == 10
     assert portfolio.positions["INFY"] == 0.0
-    assert portfolio.cash > BUYING_POWER  # proceeds received
+    assert portfolio.cash > starting_cash  # proceeds received
 
 
 def test_execute_sell_with_no_position_becomes_wait():
