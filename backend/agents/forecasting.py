@@ -66,17 +66,29 @@ def _load_model() -> lgb.Booster:
     return _model
 
 
-def analyze(symbol: str, context: dict) -> AgentOutput:
-    """context['ohlcv'] must be a DataFrame with open/high/low/close/volume
-    columns, indexed by timestamp ascending (same shape as
-    backend.data.market_data.fetch_ohlcv's output).
+def predict_return(symbol: str, context: dict) -> float | None:
+    """The raw model output, exposed separately so the orchestrator can use
+    it directly (e.g. for ConsensusResult.expected_risk_return.expected_return)
+    without parsing it back out of analyze()'s reasoning text. None if there
+    isn't enough history yet.
     """
     model = _load_model()
     df = context["ohlcv"]
     features = build_features(df, symbol)
     latest = features.iloc[[-1]][FEATURE_COLUMNS]
-
     if latest.isna().any(axis=1).item():
+        return None
+    return float(model.predict(latest)[0])
+
+
+def analyze(symbol: str, context: dict) -> AgentOutput:
+    """context['ohlcv'] must be a DataFrame with open/high/low/close/volume
+    columns, indexed by timestamp ascending (same shape as
+    backend.data.market_data.fetch_ohlcv's output).
+    """
+    predicted_return = predict_return(symbol, context)
+
+    if predicted_return is None:
         return AgentOutput(
             agent="Forecasting",
             direction=Direction.NEUTRAL,
@@ -85,7 +97,8 @@ def analyze(symbol: str, context: dict) -> AgentOutput:
             evidence=[],
         )
 
-    predicted_return = float(model.predict(latest)[0])
+    features = build_features(context["ohlcv"], symbol)
+    latest = features.iloc[[-1]][FEATURE_COLUMNS]
 
     if predicted_return > FORECAST_EPSILON:
         direction = Direction.BULLISH
