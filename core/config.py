@@ -83,3 +83,7 @@ REPLAY_SPEED = float(os.getenv("REPLAY_SPEED", "60"))  # 1 real second = this ma
 # real headroom, not a fixed short tick, or the lock never gets released
 # long enough for /api/cycle/run or even plain reads to get through.
 REPLAY_CYCLE_INTERVAL_SECONDS = int(os.getenv("REPLAY_CYCLE_INTERVAL_SECONDS", "60"))
+# Optional "YYYY-MM-DD" — pick a specific cached trading day to replay from
+# (e.g. a more volatile one) instead of always starting WARMUP_BARS into the
+# cached file. Empty string falls back to the default in replay.py.
+REPLAY_START_DATE = os.getenv("REPLAY_START_DATE", "")

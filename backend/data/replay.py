@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from core.config import REPLAY_SPEED
+from core.config import REPLAY_SPEED, REPLAY_START_DATE
 
 HISTORY_DIR = Path(__file__).parent.parent.parent / "data" / "history"
 SESSION_LENGTH = pd.Timedelta(hours=6)  # one simulated "4-6 hour" trading session
@@ -32,12 +32,21 @@ def _load_full_history(symbol: str) -> pd.DataFrame:
     return _full_history_cache[symbol]
 
 
+def _default_start(df: pd.DataFrame) -> pd.Timestamp:
+    if REPLAY_START_DATE:
+        day_bars = df[df.index.date.astype(str) == REPLAY_START_DATE]
+        if len(day_bars) > 0:
+            return day_bars.index[0]
+        # requested date not in this symbol's cached range — fall through
+    return df.index[min(WARMUP_BARS, len(df) - 1)]
+
+
 def _ensure_clock_started(symbol: str) -> None:
     global _start_wall_time, _start_sim_time
     if _start_sim_time is not None:
         return
     df = _load_full_history(symbol)
-    _start_sim_time = df.index[min(WARMUP_BARS, len(df) - 1)]
+    _start_sim_time = _default_start(df)
     _start_wall_time = time.time()
 
 

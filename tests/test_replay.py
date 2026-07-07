@@ -36,6 +36,26 @@ def _write_synthetic_history(path, n=300, seed=0):
     return df
 
 
+def test_replay_start_date_picks_that_days_first_bar(tmp_path, monkeypatch):
+    _write_synthetic_history(tmp_path / "TEST.parquet")  # spans 2026-06-01 09:15 through 2026-06-02
+    monkeypatch.setattr(replay, "REPLAY_START_DATE", "2026-06-02")
+    fake_wall_time = [1_000_000.0]
+    monkeypatch.setattr(replay.time, "time", lambda: fake_wall_time[0])
+
+    replay.fetch_ohlcv("TEST")
+    assert replay._start_sim_time.date().isoformat() == "2026-06-02"
+
+
+def test_replay_start_date_falls_back_when_not_in_range(tmp_path, monkeypatch):
+    df = _write_synthetic_history(tmp_path / "TEST.parquet")
+    monkeypatch.setattr(replay, "REPLAY_START_DATE", "2099-01-01")  # not in this file's range
+    fake_wall_time = [1_000_000.0]
+    monkeypatch.setattr(replay.time, "time", lambda: fake_wall_time[0])
+
+    replay.fetch_ohlcv("TEST")
+    assert replay._start_sim_time == df.index[replay.WARMUP_BARS]
+
+
 def test_fetch_ohlcv_returns_bars_up_to_sim_time(tmp_path, monkeypatch):
     _write_synthetic_history(tmp_path / "TEST.parquet")
 
