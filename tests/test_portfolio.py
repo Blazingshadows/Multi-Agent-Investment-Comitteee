@@ -68,6 +68,17 @@ def test_review_trade_noop_for_hold_and_wait():
     assert "not applicable" in note
 
 
+def test_review_trade_approves_sell_even_with_no_headroom():
+    # SELL closes an existing position (frees exposure), so it should never
+    # be capped by the same leverage logic that gates opening a new BUY.
+    portfolio = Portfolio(positions={"INFY": 10, "TCS": 100})
+    current_prices = {"INFY": 1500.0, "TCS": BUYING_POWER / 100}  # TCS alone consumes all buying power
+    decision = _decision("INFY", Action.SELL, allocation=0.2)
+    reviewed, note = review_trade(portfolio, decision, price=1500.0, current_prices=current_prices)
+    assert reviewed is decision
+    assert "Approved" in note
+
+
 def test_execute_buy_updates_portfolio():
     portfolio = Portfolio()
     decision = _decision("INFY", Action.BUY, allocation=0.1)
@@ -84,6 +95,25 @@ def test_execute_tiny_allocation_becomes_wait():
     assert result.action_taken == Action.WAIT
     assert result.qty == 0.0
     assert "INFY" not in portfolio.positions
+
+
+def test_execute_sell_closes_the_full_held_position_not_an_allocation_based_size():
+    portfolio = Portfolio(positions={"INFY": 10})
+    # allocation is deliberately tiny/unrelated — SELL must ignore it and
+    # close the actual held quantity, not recompute a fresh short size.
+    decision = _decision("INFY", Action.SELL, allocation=0.01)
+    result = execute(portfolio, decision, price=1500.0)
+    assert result.qty == 10
+    assert portfolio.positions["INFY"] == 0.0
+    assert portfolio.cash > BUYING_POWER  # proceeds received
+
+
+def test_execute_sell_with_no_position_becomes_wait():
+    portfolio = Portfolio()
+    decision = _decision("INFY", Action.SELL, allocation=0.2)
+    result = execute(portfolio, decision, price=1500.0)
+    assert result.action_taken == Action.WAIT
+    assert result.qty == 0.0
 
 
 def test_force_square_off_closes_all_positions():

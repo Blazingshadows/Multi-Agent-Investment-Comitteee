@@ -35,7 +35,10 @@ def review_trade(
     is the cycle's full market snapshot, needed to value existing positions
     the trade itself doesn't touch.
     """
-    if decision.consensus_verdict not in (Action.BUY, Action.SELL):
+    if decision.consensus_verdict == Action.SELL:
+        return decision, "Approved — closing/reducing an existing position frees exposure, no cap applied."
+
+    if decision.consensus_verdict != Action.BUY:
         return decision, "No position change proposed — risk review not applicable."
 
     existing_exposure = sum(
@@ -72,13 +75,17 @@ def review_trade(
 
 def execute(portfolio: Portfolio, decision: ConsensusResult, price: float) -> ExecutionResult:
     """Mechanical order sizing + cost application. Call only on a decision
-    that has already been through review_trade().
+    that has already been through review_trade(). BUY sizes a *new* position
+    from allocation x buying power; SELL closes whatever is currently held
+    for this symbol — it is not a fresh allocation-based short.
     """
-    if decision.consensus_verdict not in (Action.BUY, Action.SELL):
+    if decision.consensus_verdict == Action.BUY:
+        qty = round(decision.allocation * BUYING_POWER / price)
+    elif decision.consensus_verdict == Action.SELL:
+        qty = portfolio.positions.get(decision.symbol, 0.0)
+    else:
         return ExecutionResult(action_taken=decision.consensus_verdict, qty=0.0, price=price, net_cash_flow=0.0, cost_breakdown=None)
 
-    notional = decision.allocation * BUYING_POWER
-    qty = round(notional / price)
     if qty <= 0:
         return ExecutionResult(action_taken=Action.WAIT, qty=0.0, price=price, net_cash_flow=0.0, cost_breakdown=None)
 
