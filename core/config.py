@@ -42,3 +42,8 @@ SLIPPAGE_PCT_RANGE = (0.0002, 0.0005)
 # Session timing (IST)
 SESSION_START = "09:15"
 SESSION_SQUARE_OFF = "15:15"  # forced close, ahead of actual 15:30 market close
+
+# Forecasting agent (backend/agents/forecasting.py)
+FORECAST_HORIZON_BARS = 3  # 3 x 5-min bars = next 15 minutes
+FORECAST_EPSILON = 0.0005  # |predicted return| below this -> NEUTRAL
+FORECAST_CONFIDENCE_SCALE = 0.005  # |predicted return| at/above this -> confidence 1.0

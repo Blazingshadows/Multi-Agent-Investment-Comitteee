@@ -5,6 +5,7 @@ __pycache__/
 venv/
 *.db
 data/history/
+models/
 .env
 .DS_Store
 node_modules/
