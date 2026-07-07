@@ -199,54 +199,57 @@ This one table directly satisfies every bullet in the problem statement's "Per T
 
 ---
 
-## 7. Solo build plan
+## 7. Build status — MVP complete end-to-end
 
-**Team is now just Sachin, working with Claude Code driving most of the implementation directly.** No more branch split — everything lives on `main`. Sequenced so the graded differentiator (the consensus engine) and everything testable without external API keys comes first; LLM-dependent pieces (needing a Groq/OpenRouter/Ollama key) come after.
+Everything below is built, tested (72 tests passing — `pytest tests/`), and verified against real data and real LLM calls, not just the fixture. All on `main`.
 
-### Already built, tested, and pushed to `main`
+| Layer | Files | Status |
+|---|---|---|
+| Contract | `core/schemas.py`, `core/config.py`, `db/schema.sql` | Frozen, unchanged since hour 0 |
+| Data | `backend/data/market_data.py` (+ `fetch_fundamentals`), `news_feed.py`, `macro_calendar.py` | Live-verified against yfinance + Google News RSS |
+| Deterministic agents | `backend/agents/technical.py`, `forecasting.py` (+ `scripts/train_forecasting_model.py`) | Trained, 53.7% directional accuracy — honest edge over the 50% baseline |
+| LLM agents | `fundamental.py`, `sentiment.py`, `macro_policy.py`, `risk.py`, `core/llm_router.py` | Live-verified against real Groq calls |
+| Critics | `backend/critics/devils_advocate.py`, `opportunity.py` | Live-verified — prompt rewritten once after catching one-word non-answers in testing |
+| Trust | `core/trust_store.py` | Numerically reproduces the PS's own "Agent A always agrees / Agent B profitably disagrees" example |
+| Consensus | `core/consensus_engine.py` | The graded core — real §3 formula including `agreement_live_i`, `evaluate_switch()` |
+| Risk + Execution | `core/portfolio.py` | `review_trade()` (approve/reduce/reject), `execute()`, `force_square_off()` |
+| Persistence | `db/persistence.py` | All 4 tables, read helpers for the API/dashboard |
+| Orchestrator | `backend/orchestrator.py` | Full cycle: agents → critics → consensus → SWITCH → risk → execution → persistence |
+| API | `api/main.py` | FastAPI REST + WebSocket, background cycle loop |
+| Dashboard | `dashboard.py` | Streamlit, live-verified against a real running API |
 
-- `core/schemas.py` — `AgentOutput`, `AgentWeight`, `CriticFeedback`, `ExpectedRiskReturn`, `ConsensusResult`, `CostBreakdown`, `DecisionLogRow`
-- `core/config.py` — capital/leverage, watchlist (TATAMOTORS→AXISBANK fixed), consensus thresholds (`θ_hold`, `θ_buy`, `θ_sell`, `λ`, `γ`), cost-model rates
-- `db/schema.sql` — `decision_log`, `agent_predictions`, `trades`, `portfolio_snapshots`
-- `tests/fixtures/agent_outputs.json`, `tests/test_stub_pipeline.py` — proves fixture → consensus → cost model → SQLite end-to-end. **Rerun after any change to a shared file.**
-- `backend/data/market_data.py` (verified against live yfinance), `scripts/backfill_history.py` (60 days of 5-min bars per watchlist stock cached to `data/history/*.parquet`, gitignored)
-- `core/cost_model.py` — real §4 NSE cost formula
+### Real bugs caught by testing before they reached a live run
 
-### Build order
+Worth knowing about if you're touching this code — each was caught by either a test or a live smoke test, not by inspection:
+- RSI computed `NaN` instead of `100` on a zero-loss window (`avg_loss.replace(0, np.nan)` masked a legitimate value).
+- The §3 decision-rule pseudocode left a threshold gap undefined; `allocation = min(2.0, |DCS|)` could never reach the leverage cap since DCS is bounded to `[-1,1]`.
+- SELL was sized as a fresh allocation-based short instead of closing the actual held quantity.
+- `record_prediction()` ran before `run_consensus()`, so a symbol's own current-cycle votes polluted its own "historical" trust computation.
+- The orchestrator's critic pass iterated the raw watchlist instead of symbols that survived data-fetch failures → `KeyError` the moment any one symbol's fetch failed.
+- FastAPI's sync endpoints run in a worker threadpool; a shared SQLite connection without `check_same_thread=False` crashed on any read.
+- A lock held for an entire orchestrator cycle (minutes, across a full watchlist) froze every dashboard read for that whole duration — fixed with WAL mode + per-request read connections.
+- `Portfolio.cash` defaulted to `BUYING_POWER` (₹20,000) instead of `CAPITAL` (₹10,000) — a fresh portfolio reported "100% growth" before a single trade.
 
-No external dependency needed for these — build and fully test first:
-1. **`backend/agents/forecasting.py`** — trained LightGBM/XGBoost on `data/history/*.parquet`. The one tool that proves "custom AI/ML," not an LLM wrapper.
-2. **`backend/agents/technical.py`** — RSI/MACD/moving averages computed in code from live OHLCV.
-3. **`core/trust_store.py`** — reads/writes `agent_predictions` for `historical_reliability_i` / `herding_penalty_i`.
-4. **`core/consensus_engine.py`** — replace the stub with the real §3 formula (including `agreement_live_i`). This is the graded core — highest priority.
-5. **`core/portfolio.py`** — extend with the Risk Management Layer (leverage cap, approve/reduce/reject, forced square-off).
-6. **`db/persistence.py`** — extend with `trades`/`agent_predictions`/`portfolio_snapshots` writers.
+### What's not built — genuine gaps, not exaggerated completeness
 
-Needs an LLM provider key (Groq free tier is enough to start):
-7. **`core/llm_router.py`** — `complete(system, user, json_schema)` with Groq → Ollama → OpenRouter fallback.
-8. **`backend/agents/fundamental.py`, `sentiment.py`, `macro_policy.py`, `risk.py`**.
-9. **`backend/critics/devils_advocate.py`, `opportunity.py`**.
-
-Ties everything together:
-10. **Orchestrator loop** — each cycle: agents → consensus → execution → persistence.
-11. **`api/main.py`** (FastAPI) + **dashboard** (Streamlit).
-12. Full dry run in replay mode, tune thresholds, freeze code.
-
-Forecasting-model note: don't reach for a deep LSTM under time pressure — a gradient-boosted tree on lagged returns/indicators trains in seconds on either machine, is trivial to explain to judges via feature importances, and is much less likely to blow up your 24h budget than debugging a neural net at 3am. Treat "deep learning" in the tool name as optional, not literal; a defensible trained model beats a fragile fancy one.
-
-Have a **recorded/replayed fallback run** ready before judging — if the venue wifi or a free-tier LLM dies mid-demo, you switch to replay mode without missing a beat.
+- **Replay mode.** NSE hours are 9:15–15:30 IST; if your demo slot falls outside that window, `backend/data/market_data.py` has no accelerated-replay alternate data source yet. Build this before judging if your slot is off-hours — it was deprioritized in favor of finishing the graded consensus core first.
+- **Cross-session trust persistence.** `historical_reliability_i` resets to the 0.5 prior each session (SQLite file per run); warm-starting from a prior session's `agent_predictions` is unbuilt.
+- **In-memory portfolio doesn't survive an API restart.** `Portfolio` lives in `api/main.py`'s process memory; a restart loses position state (decision/trade history in SQLite is unaffected).
+- A full 10-stock cycle takes multiple minutes on Groq's free tier and can hit rate limits under repeated testing (validated live — the fallback-to-neutral path handled it cleanly, but budget for it before a live demo, or trim the watchlist).
 
 ---
 
-## 8. Stretch goals (only after MVP fully works end-to-end)
+## 8. Stretch goals (only after the above gaps are addressed)
 
+- Build replay mode (see above — this is higher priority than anything below it if your demo is off-hours).
 - Split the unified critic back into Risk/Profit/Macro critics (matches the reference diagram exactly).
 - Add Sector Intelligence as its own agent instead of folded into Opportunity Critic.
-- Add a Planner Agent that dynamically selects which specialist agents to consult per cycle, instead of the MVP's fixed-roster asyncio loop (matches the reference diagram's Investment Planner Agent box — see README's "Investment Planner Agent" layer).
-- Persist historical reliability/trust across sessions (SQLite already has the data — the MVP formula just resets the prior each session; stretch is to warm-start `historical_reliability_i` from prior sessions' `agent_predictions` instead).
+- Add a Planner Agent that dynamically selects which specialist agents to consult per cycle, instead of always running the full roster (matches the reference diagram's Investment Planner Agent box).
+- Persist historical reliability/trust across sessions.
 - Real-time social sentiment (StockTwits/Twitter) alongside news.
-- Calibration plot of confidence vs. actual hit-rate per agent (nice slide, shows you actually measured trust rather than asserting it).
+- Calibration plot of confidence vs. actual hit-rate per agent.
 - Multi-day backtest mode to show the consensus weights adapting over time.
+- Parallelize across symbols in the orchestrator (currently only within-symbol agent calls are concurrent) to cut cycle time.
 
 ---
 
