@@ -25,9 +25,11 @@ WATCHLIST = [
 THETA_HOLD = 0.15
 THETA_BUY = 0.35
 THETA_SELL = 0.35
+THETA_VAR = 0.05  # weighted disagreement above this, inside the hold band -> WAIT instead of HOLD
 LAMBDA_HERDING = 0.5  # weight of herding_penalty inside trust_i
 GAMMA_AGREEMENT = 0.4  # exponent on agreement_live_i in w_i_raw
 HERDING_PENALTY_MIN_AGREEMENT_RATE = 0.8  # only penalize agreement rates above this
+SWITCH_SAFETY_MARGIN = 0.002  # extra edge required over round-trip cost before SWITCH fires
 
 # NSE intraday equity retail cost model — §4 (fractions, not percentages)
 BROKERAGE_FLAT_CAP = 20.0

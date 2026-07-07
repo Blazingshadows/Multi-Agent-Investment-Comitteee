@@ -82,18 +82,20 @@ DCS = Σ_i  w_i * signed_vote_i        # ∈ [-1, +1]
 disagreement = Σ_i w_i * (signed_vote_i − DCS)²     # weighted variance
 ```
 
-**Decision rule:**
+**Decision rule** (order matters — BUY/SELL checked first, WAIT is the catch-all for anything in between the hold-band and the buy/sell thresholds, which the original 4-branch sketch left undefined):
 
 ```
-if   |DCS| < θ_hold  and disagreement < θ_var   → HOLD   (agents genuinely agree it's neutral)
-elif |DCS| < θ_hold  and disagreement >= θ_var  → WAIT   (agents disagree a lot — not enough clarity to act)
-elif DCS >= θ_buy                                → BUY
-elif DCS <= -θ_sell                               → SELL
+if   DCS >= θ_buy                                → BUY
+elif DCS <= -θ_sell                              → SELL
+elif |DCS| < θ_hold  and disagreement < θ_var    → HOLD   (agents genuinely agree it's neutral)
+else                                             → WAIT   (weak conviction, or high disagreement, or the mid-zone between θ_hold and θ_buy/sell)
 ```
 
-**SWITCH**: if the Opportunity Critic proposes an alternative stock whose DCS beats the current position's DCS by more than the round-trip trading cost (see §4) + a safety margin, switch. Otherwise stay put — this stops the bot from churning on noise.
+**SWITCH**: if the Opportunity Critic proposes an alternative stock whose DCS beats the current position's DCS by more than the round-trip trading cost (see §4) + a safety margin, switch. Otherwise stay put — this stops the bot from churning on noise. Implemented as `consensus_engine.evaluate_switch()`, separate from `run_consensus()` since it requires comparing two stocks' DCS.
 
-Suggested starting thresholds: `θ_hold = 0.15`, `θ_buy = θ_sell = 0.35`, tune once you see real numbers from a dry run. Log every raw factor (`expertise`, `trust`, `relevance`, `agreement_live`, `w_i`, `signed_vote_i`) per agent per trade — this *is* your "Consensus Reasoning" + "Directional Confidence Score" output field, and it's what makes the system explainable rather than a black box.
+**Allocation**: DCS is mathematically bounded to `[-1, 1]` (a weighted average of votes each in `[-1, 1]`), so allocating `min(2.0, |DCS|)` of capital can never reach the 1:2 leverage cap. Instead scale by how far past the BUY/SELL threshold the conviction sits: `allocation = min(2.0, |DCS| / θ_buy_or_sell)` — 1.0x capital right at the threshold, up to the full 2.0x leverage cap as conviction approaches `|DCS| = 1`.
+
+Suggested starting thresholds: `θ_hold = 0.15`, `θ_buy = θ_sell = 0.35`, `θ_var = 0.05`, tune once you see real numbers from a dry run. Log every raw factor (`expertise`, `trust`, `relevance`, `agreement_live`, `w_i`, `signed_vote_i`) per agent per trade — this *is* your "Consensus Reasoning" + "Directional Confidence Score" output field, and it's what makes the system explainable rather than a black box.
 
 **Worked example (put this in your pitch deck, judges love a concrete trace):**
 Technical=BUY(0.8), Fundamental=HOLD(0.4), Sentiment=BUY(0.6), Macro=SELL(0.3), Risk=HOLD(0.5).
