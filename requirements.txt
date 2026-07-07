@@ -1,0 +1,23 @@
+# Shared
+pydantic>=2.6
+python-dotenv
+
+# Person A — agents, critics, consensus, LLM routing
+groq
+openai              # OpenRouter is OpenAI-compatible; also used for local Ollama's OpenAI-compatible endpoint
+lightgbm
+scikit-learn
+pandas
+numpy
+
+# Person B — data, execution, API, dashboard
+yfinance
+feedparser          # RSS news ingestion
+fastapi
+uvicorn[standard]
+websockets
+httpx
+streamlit
+
+# Tests
+pytest

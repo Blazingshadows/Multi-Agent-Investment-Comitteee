@@ -1,0 +1,44 @@
+[
+  {
+    "agent": "Technical",
+    "direction": 1,
+    "confidence": 0.8,
+    "reasoning": "RSI momentum breakout with bullish 20/50 EMA cross",
+    "evidence": ["RSI=68", "MACD histogram turned positive"]
+  },
+  {
+    "agent": "Fundamental",
+    "direction": 0,
+    "confidence": 0.4,
+    "reasoning": "Valuation roughly fair, no fresh catalyst this session",
+    "evidence": ["P/E in-line with sector median"]
+  },
+  {
+    "agent": "Sentiment",
+    "direction": 1,
+    "confidence": 0.6,
+    "reasoning": "Positive news flow following an earnings beat",
+    "evidence": ["3 positive headlines in the last hour"]
+  },
+  {
+    "agent": "Macro & Policy",
+    "direction": -1,
+    "confidence": 0.3,
+    "reasoning": "Sector-wide caution ahead of the RBI policy announcement",
+    "evidence": ["RBI policy day context flag active"]
+  },
+  {
+    "agent": "Risk",
+    "direction": 0,
+    "confidence": 0.5,
+    "reasoning": "Volatility moderate, no unusual drawdown risk flagged",
+    "evidence": ["ATR within normal 30-day range"]
+  },
+  {
+    "agent": "Forecasting",
+    "direction": 1,
+    "confidence": 0.55,
+    "reasoning": "Model predicts +0.4% next 15min",
+    "evidence": ["feature_importance: lag_return_5m=0.32"]
+  }
+]
