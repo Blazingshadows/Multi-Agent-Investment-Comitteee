@@ -12,6 +12,7 @@ numpy
 
 # Person B — data, execution, API, dashboard
 yfinance
+pyarrow             # parquet cache for backfilled history
 feedparser          # RSS news ingestion
 fastapi
 uvicorn[standard]

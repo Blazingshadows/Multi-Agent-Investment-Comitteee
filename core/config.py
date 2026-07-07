@@ -15,7 +15,7 @@ WATCHLIST = [
     "INFY",
     "ICICIBANK",
     "SBIN",
-    "TATAMOTORS",
+    "AXISBANK",  # was TATAMOTORS — delisted after the 2025 Tata Motors PV/CV demerger (now TMPV / TMCV)
     "ITC",
     "LT",
     "ADANIENT",
