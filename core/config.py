@@ -31,6 +31,10 @@ GAMMA_AGREEMENT = 0.4  # exponent on agreement_live_i in w_i_raw
 HERDING_PENALTY_MIN_AGREEMENT_RATE = 0.8  # only penalize agreement rates above this
 SWITCH_SAFETY_MARGIN = 0.002  # extra edge required over round-trip cost before SWITCH fires
 
+# Risk Management Layer — core/portfolio.py
+MAX_POSITION_FRACTION = 0.4  # no single stock may exceed this fraction of buying power
+MAX_RISK_SCORE = 0.75  # expected_risk_return.risk_score above this halves the allocation
+
 # NSE intraday equity retail cost model — §4 (fractions, not percentages)
 BROKERAGE_FLAT_CAP = 20.0
 BROKERAGE_PCT = 0.0003
